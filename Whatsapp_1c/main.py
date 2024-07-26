@@ -20,7 +20,6 @@ message_template = (
     "(Чтобы ссылка стала активной, напишите нам любое сообщение.)"
 )
 
-
 # Функция для преобразования номера телефона в формат Казахстана
 def convert_to_kazakh_format(phone_number):
     if phone_number.startswith("8"):
@@ -28,7 +27,6 @@ def convert_to_kazakh_format(phone_number):
     elif phone_number.startswith("+7"):
         return phone_number[2:]
     return phone_number
-
 
 # Функция для отправки сообщения через Green API
 def send_message(phone_number, message):
@@ -42,11 +40,9 @@ def send_message(phone_number, message):
     response = requests.post(green_api_url, data=json.dumps(payload), headers=headers)
     return response.json()
 
-
 # Храним отправленные номера и дату отправки
 sent_messages = {}
 last_cleanup_date = None
-
 
 def fetch_and_send_messages():
     global last_cleanup_date
@@ -62,6 +58,7 @@ def fetch_and_send_messages():
     four_days_ago_str = four_days_ago.strftime('%Y%m%d')
     three_days_ago_str = three_days_ago.strftime('%Y%m%d')
 
+    # Получаем данные с сайта
     url = f"https://asiamebel.itsg.kz/ERP_WORK/hs/wzexch/getOrderInfo?StartDate={four_days_ago_str}&EndDate={three_days_ago_str}"
     auth = HTTPBasicAuth('wzexch', 'XO5qazon')
 
@@ -69,44 +66,51 @@ def fetch_and_send_messages():
         response = requests.get(url, auth=auth)
         response.raise_for_status()
         data = response.json().get("body", [])
-
-        if isinstance(data, list):
-            for order in data:
-                order_date = order.get("Дата", "")
-                if order_date.startswith("20240711"):
-                    contact_info = order.get("Контрагент_КонтактнаяИнформацияКонтрагент", [])
-                    for contact in contact_info:
-                        if contact.get("Вид") == "Телефон контрагента":
-                            phone_number = contact.get("Представление")
-                            kazakh_phone_number = convert_to_kazakh_format(phone_number)
-
-                            # Проверяем, был ли номер отправлен сегодня
-                            today_str = now.strftime('%Y-%m-%d')
-                            if (kazakh_phone_number in sent_messages and
-                                    sent_messages[kazakh_phone_number] == today_str):
-                                print(f"Сообщение уже отправлено на {kazakh_phone_number} сегодня.")
-                                continue
-
-                            response = send_message(kazakh_phone_number, message_template)
-                            if response.get("sent") == True:
-                                print(f"Сообщение отправлено на {kazakh_phone_number}")
-                                # Сохраняем номер и дату отправки
-                                sent_messages[kazakh_phone_number] = today_str
-        else:
-            print("Ответ не является списком. Ответ:")
-            print(data)
-
     except requests.RequestException as e:
         print(f"Ошибка при запросе данных: {e}")
-    except Exception as e:
-        print(f"Произошла ошибка: {e}")
+        return
 
+    # Создаем множество уникальных номеров телефонов
+    unique_phone_numbers = set()
+
+    if isinstance(data, list):
+        for order in data:
+            order_date = order.get("Дата", "")
+            if four_days_ago_str <= order_date <= three_days_ago_str:
+                contact_info = order.get("Контрагент_КонтактнаяИнформацияКонтрагент", [])
+                for contact in contact_info:
+                    if contact.get("Вид") == "Телефон контрагента":
+                        phone_number = contact.get("Представление")
+                        if not phone_number:
+                            print("Пустой номер телефона, пропускаем.")
+                            continue
+
+                        kazakh_phone_number = convert_to_kazakh_format(phone_number)
+                        unique_phone_numbers.add(kazakh_phone_number)
+
+    else:
+        print("Ответ не является списком. Ответ:")
+        print(data)
+        return
+
+    # Отправляем сообщения только уникальным номерам
+    today_str = now.strftime('%Y-%m-%d')
+    for phone_number in unique_phone_numbers:
+        if (phone_number in sent_messages and
+                sent_messages[phone_number] == today_str):
+            print(f"Сообщение уже отправлено на {phone_number} сегодня.")
+            continue
+
+        response = send_message(phone_number, message_template)
+        if response.get("sent") == True:
+            print(f"Сообщение отправлено на {phone_number}")
+            sent_messages[phone_number] = today_str
 
 # Бесконечный цикл для проверки времени
 while True:
     current_time = datetime.now(timezone.utc) + timedelta(hours=5)
 
-    if current_time.hour == 16 and current_time.minute == 30:
+    if current_time.hour == 10 and current_time.minute == 22:
         fetch_and_send_messages()
         time.sleep(3660)
     else:
